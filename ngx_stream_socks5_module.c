@@ -99,11 +99,11 @@ static void ngx_stream_socks5_upstream_send_request(ngx_stream_session_t *s,
 static void
 ngx_stream_socks5_process_header_handler(ngx_event_t *ev);
 /*
- * 处理upstream的消息头
+ * porcess upstream header
  */
 static void ngx_stream_socks5_process_header(ngx_stream_session_t *s);
 /*
- * 与upstream协议协商成功，向downstream发送成功消息。
+ * send "successful response" to downstream after negotiating with upstream
  */
 static void ngx_stream_socks5_send_response(ngx_stream_session_t *s);
 
@@ -127,11 +127,10 @@ static void ngx_stream_socks5_process_connection(ngx_event_t *ev,
 static void ngx_stream_socks5_connect_handler(ngx_event_t *ev);
 static ngx_int_t ngx_stream_socks5_test_connect(ngx_connection_t *c);
 /*
- * 尝试从downstream读取数据
- * 返回值
- *  >0  缓冲区字节数大小
- *  =0  通道已经关闭
- *  <0  错误,需要区分NGX_AGAIN
+ * try read from downstream
+ * @retval  >0  buffer size
+ * @retval  =0  downstream closed
+ * @retval  <0  error, remind NGX_AGAIN
  */
 static ssize_t ngx_stream_socks5_read_request(ngx_stream_session_t *s,
     ngx_stream_socks5_ctx_t *ctx);
@@ -490,12 +489,12 @@ static void ngx_stream_socks5_process_reqeust(ngx_event_t *ev)
     if(c->write->timer_set) {
         ngx_del_timer(c->write);
     }
-    
+
     ctx = ngx_stream_get_module_ctx(s, ngx_stream_socks5_module);
     n = ngx_stream_socks5_read_request(s, ctx);
 
     if(n == 0) {
-        ngx_log_error(NGX_LOG_INFO, c->log, NGX_ERROR, "client close connection");
+        ngx_log_error(NGX_LOG_INFO, c->log, 0, "client close connection");
         ngx_stream_socks5_finalize(s, NGX_OK);
         return;
     }
@@ -511,7 +510,7 @@ static void ngx_stream_socks5_process_reqeust(ngx_event_t *ev)
     }
 
     if(rc == NGX_AGAIN && ctx->downstream_buf.last == ctx->downstream_buf.end) {
-        ngx_log_error(NGX_LOG_INFO, c->log, NGX_ERROR, "client request is to big");
+        ngx_log_error(NGX_LOG_INFO, c->log, 0, "client request is to big");
         ngx_stream_socks5_finalize(s, NGX_STREAM_OK);
         return;
     }
@@ -521,7 +520,7 @@ static void ngx_stream_socks5_process_reqeust(ngx_event_t *ev)
     }
 
     if(c->read->eof) {
-        ngx_log_error(NGX_LOG_INFO, c->log, NGX_ERROR, "client close connection");
+        ngx_log_error(NGX_LOG_INFO, c->log, 0, "client close connection");
         ngx_stream_socks5_finalize(s, NGX_OK);
         return;
     }
@@ -558,7 +557,7 @@ ngx_stream_socks5_process_reqeust_first(ngx_stream_session_t *s, ngx_buf_t *b)
 
     nm = p[1];
     if(p[0] != '\x05' || nm == 0) {
-        ngx_log_error(NGX_LOG_INFO, c->log, NGX_ERROR, "socks version error");
+        ngx_log_error(NGX_LOG_INFO, c->log, 0, "socks version error");
         ngx_stream_socks5_finalize(s, NGX_OK);
         return NGX_ERROR;
     }
@@ -634,7 +633,7 @@ ngx_stream_socks5_process_reqeust_details(ngx_stream_session_t *s,
     }
 
     if(p[0] != 0x05 || p[2] != 0x00) {
-        ngx_log_error(NGX_LOG_INFO, c->log, NGX_ERROR, "socks request detail data error");
+        ngx_log_error(NGX_LOG_INFO, c->log, 0, "socks request detail data error");
         ngx_stream_socks5_finalize(s, NGX_OK);
         return NGX_ERROR;
     }
@@ -681,7 +680,7 @@ ngx_stream_socks5_process_reqeust_details(ngx_stream_session_t *s,
             ngx_memset(buf, 0, sizeof(buf));
             buf[0] = '\x05'; buf[1] = '\x08';
             s->connection->send(s->connection, buf, 10);
-            ngx_log_error(NGX_LOG_INFO, c->log, NGX_ERROR, "(%ui) address type not supported", atyp);
+            ngx_log_error(NGX_LOG_INFO, c->log, 0, "(%ui) address type not supported", atyp);
             ngx_stream_socks5_finalize(s, NGX_OK);
             return NGX_ERROR;
         break;
@@ -709,7 +708,7 @@ ngx_stream_socks5_process_reqeust_details(ngx_stream_session_t *s,
             ngx_memset(buf, 0, sizeof(buf));
             buf[0] = '\x05'; buf[1] = '\x07';
             s->connection->send(s->connection, buf, 10);
-            ngx_log_error(NGX_LOG_INFO, c->log, NGX_ERROR, "(%ui) command not supported", cmd);
+            ngx_log_error(NGX_LOG_INFO, c->log, 0, "(%ui) command not supported", cmd);
             ngx_stream_socks5_finalize(s, NGX_OK);
         break;
         case 0x03: /* UDP ASSOCIATE */
@@ -1348,8 +1347,8 @@ ngx_stream_socks5_send_response(ngx_stream_session_t *s)
     if(pc->local_sockaddr->sa_family == AF_INET6) {
 #if (NGX_HAVE_INET6)
         p[3] = '\x01';
-        ngx_memcpy(p + 4, &((struct sockaddr_in6*)pc->local_sockaddr)->sin6_addr, sizeof(in6_addr_t));
-        p += (4 + sizeof(in6_addr_t));
+        ngx_memcpy(p + 4, &((struct sockaddr_in6*)pc->local_sockaddr)->sin6_addr, sizeof(struct in6_addr));
+        p += (4 + sizeof(struct in6_addr));
         *(in_port_t*)p = ((struct sockaddr_in6*)pc->local_sockaddr)->sin6_port;
         p += 2;
 #endif
@@ -1799,7 +1798,6 @@ ngx_stream_socks5_process_connection(ngx_event_t *ev, ngx_uint_t from_upstream)
     if (ev->timedout) {
         ev->timedout = 0;
 
-        /* stream proxy 模块使用 delayed 标记来处理限速 */
         if (ev->delayed) {
             ev->delayed = 0;
 
@@ -1820,7 +1818,7 @@ ngx_stream_socks5_process_connection(ngx_event_t *ev, ngx_uint_t from_upstream)
         } else {
 
             if(pc && pc->type == SOCK_DGRAM) {
-                /* 处理 UDP 正常关闭 */
+                /* TODO: UDP close */
             }
 
             ngx_connection_error(c, NGX_ETIMEDOUT, "connection timed out");
@@ -2768,8 +2766,8 @@ ngx_stream_socks5_trojan_send_request(ngx_stream_session_t *s)
         p += (2 + 4);
     } else if(ctx->dst_addr.sockaddr->sa_family == AF_INET6) {
         p[1] = '\x04';
-        ngx_memcpy(p + 2, &((struct sockaddr_in6*)ctx->dst_addr.sockaddr)->sin6_addr, sizeof(in6_addr_t));
-        p += (2 + sizeof(in6_addr_t));
+        ngx_memcpy(p + 2, &((struct sockaddr_in6*)ctx->dst_addr.sockaddr)->sin6_addr, sizeof(struct in6_addr));
+        p += (2 + sizeof(struct in6_addr));
     }
 
     *(in_port_t *)p =  htons(ctx->dst_port);
